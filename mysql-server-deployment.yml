@@ -1,0 +1,70 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: guestbook-db-svc
+  labels:
+    app: guestbook-db
+spec:
+  ports:
+  - port: 3306
+    targetPort: 3306
+  selector:
+    app: guestbook-db
+  type: ClusterIP
+
+---
+
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: mysql-server
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: guestbook-db
+spec:
+  replicas: 1
+  selector:
+      matchLabels:
+        app: guestbook-db
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: guestbook-db
+    spec:
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: mysql-server
+      containers:
+      - name: guestbook-db
+        image: mysql:5.7
+        args:
+        - "--ignore-db-dir=lost+found"
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: guestbook-sql
+              key: password
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        livenessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 15
+          periodSeconds: 10

@@ -1,0 +1,149 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guestbook-sql-config
+  namespace: default
+data:
+  sql.port: "3306"
+  sql.db: guestbook
+  sql.createdb: T
+  sql.lb: guestbook-db-svc
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: guestbook
+spec:
+  replicas: 8
+  selector:
+      matchLabels:
+        app: guestbook
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+  minReadySeconds: 10
+  template:
+    metadata:
+      labels:
+        app: guestbook
+    spec:
+      volumes:
+      - name: sqlfiles
+        emptyDir: {}
+      initContainers:
+      - name: init-myservice
+        image: indiehosters/git
+        volumeMounts:
+        - name: sqlfiles
+          mountPath: /tmp/sqlfiles
+        command: ['/usr/bin/git', 'clone', 'https://github.com/morfien101/guestbook-sql-files.git', '/tmp/sqlfiles']
+      - name: mysql-bootstrap
+        image: morfien101/mysql-schema-updater
+        volumeMounts:
+        - name: sqlfiles
+          mountPath: /data
+        env:
+        - name: SQL_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: guestbook-sql-config
+              key: sql.lb
+        - name: SQL_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: guestbook-sql-config
+              key: sql.port
+        - name: SQL_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: guestbook-sql
+              key: username
+        - name: SQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: guestbook-sql
+              key: password
+        - name: SQL_DB
+          valueFrom:
+            configMapKeyRef:
+              name: guestbook-sql-config
+              key: sql.db
+        - name: CREATE_DB
+          valueFrom:
+            configMapKeyRef:
+              name: guestbook-sql-config
+              key: sql.createdb
+      containers:
+      - name: guestbook
+        image: morfien101/guestbookdemo:0.0.1
+        ports:
+        - containerPort: 8080
+        env:
+        - name: HTML_COLOR
+          value: CRIMSON
+        - name: SQL_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: guestbook-sql-config
+              key: sql.lb
+        - name: SQL_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: guestbook-sql-config
+              key: sql.port
+        - name: SQL_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: guestbook-sql
+              key: username
+        - name: SQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: guestbook-sql
+              key: password
+        - name: SQL_DB
+          valueFrom:
+            configMapKeyRef:
+              name: guestbook-sql-config
+              key: sql.db
+        - name: CREATE_DB
+          valueFrom:
+            configMapKeyRef:
+              name: guestbook-sql-config
+              key: sql.createdb
+        livenessProbe:
+          httpGet:
+            path: /_status
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 5
+          failureThreshold: 3
+
+---
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: guestbook-service
+  labels:
+    app: guestbook
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: http
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-timeout: "60"
+    service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout: "60"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    external-dns.alpha.kubernetes.io/hostname: guestbook.k8s.nvmlabs.com.
+    external-dns.alpha.kubernetes.io/ttl: "300"
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app: guestbook
+  type: LoadBalancer
+
